@@ -31,7 +31,7 @@ FEATURES = {
         "datamin": "0.05", "datamax": "20", "scale": "log"
     },
     "kd490": {
-        "product": "Kd_490",          # capital K
+        "product": "Kd_490",          
         "template": "/Users/yashnilmohanty/Desktop/HABs_Research/Data/kd490/"
                     "AQUA_MODIS.{start}_{end}.L3b.8D.KD.x.nc",
         "datamin": "0.01", "datamax": "0.5", "scale": "log"

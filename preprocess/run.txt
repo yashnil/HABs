@@ -1,0 +1,3 @@
+micromamba activate habs_env
+cd ~/Desktop/HABs
+python preprocess/merge_root_dataset.py

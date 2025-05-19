@@ -1,47 +1,73 @@
 #!/usr/bin/env python3
-"""
-Merge MODIS, CMEMS & ERA5 into one aligned 8-day, 4 km dataset.
-Writes processed/HAB_dataset_root.nc
-"""
-
 import xarray as xr
 import numpy as np
+import xesmf as xe
 from pathlib import Path
 
-# ─── paths ────────────────────────────────────────────────────────────────
-ROOT      = Path("/Users/yashnilmohanty/Desktop/HABs_Research")
-MODIS_NC  = ROOT/"processed"/"modis_target.nc"
-CMEMS_NC  = ROOT/"Processed"/"cmems_so_8day_4km.nc"
-ERA5_GLOB = str(ROOT/"Processed"/"era5_*_8day_4km.nc")
-OUT_NC    = ROOT/"processed"/"HAB_dataset_root.nc"
+# ── adjust these to your paths ────────────────────────────────────────────────
+BASE   = Path("/Users/yashnilmohanty/Desktop/HABs_Research/Processed")
+MODIS  = BASE / "modis_target.nc"
+ERA5   = BASE / "era5_8day.nc"
+CMEMS  = BASE / "cmems_8day.nc"
+OUT    = BASE / "root_dataset.nc"
 
-# ─── load each source ─────────────────────────────────────────────────────
-ds_modis = xr.open_dataset(MODIS_NC)
-ds_cmems = xr.open_dataset(CMEMS_NC)
-ds_era5  = xr.open_mfdataset(ERA5_GLOB, combine="by_coords", parallel=True)
+# ── 1) load all three datasets (with CF‐time decoding) ─────────────────────────
+print("→ loading MODIS…")
+ds_modis = xr.open_dataset(MODIS, decode_times=True)
 
-# ─── compute common time axis ─────────────────────────────────────────────
-t_modis = ds_modis.time.values
-t_cmems = ds_cmems.time.values
-t_era5  = ds_era5.time.values
+print("→ loading ERA5…")
+ds_era5 = xr.open_dataset(ERA5, decode_times=True)
 
-# intersection of all three
-common = np.intersect1d(t_modis, t_cmems)
-common = np.intersect1d(common,  t_era5)
-common = np.sort(common)
+print("→ loading CMEMS…")
+ds_cmems = xr.open_dataset(CMEMS, decode_times=True)
 
-print(f"→ common time length: {len(common)}")
+# ── 2) rename the MODIS dims and give it real lon/lat coords ──────────────────
+#    it was (time, y, x); CF wants (time, lat, lon)
+ds_modis = ds_modis.rename({"x": "lon", "y": "lat"})
 
-# ─── re-select each dataset on that common time ───────────────────────────
-ds_modis = ds_modis.sel(time=common)
-ds_cmems = ds_cmems.sel(time=common)
-ds_era5  = ds_era5.sel(time=common)
+# derive the target lon/lat extents from your ERA5 file:
+lon_min, lon_max = float(ds_era5.lon.min()), float(ds_era5.lon.max())
+lat_min, lat_max = float(ds_era5.lat.min()), float(ds_era5.lat.max())
 
-# ─── merge them all ───────────────────────────────────────────────────────
-ds = xr.merge([ds_modis, ds_cmems, ds_era5], compat="override")
+# get the MODIS grid size:
+nlon = ds_modis.sizes["lon"]
+nlat = ds_modis.sizes["lat"]
 
-# ─── write compressed NetCDF ──────────────────────────────────────────────
-encoding = {v: {"zlib": True, "complevel": 4} for v in ds.data_vars}
-ds.to_netcdf(OUT_NC, encoding=encoding)
+# build evenly spaced lon/lat arrays:
+lon1d = np.linspace(lon_min, lon_max, nlon)
+# ERA5 lat may run from north→south; we want lat max→lat min
+lat1d = np.linspace(lat_max, lat_min, nlat)
 
-print("✅ merged dataset written to", OUT_NC)
+# attach them
+ds_modis = ds_modis.assign_coords({
+    "lon": ("lon", lon1d),
+    "lat": ("lat", lat1d),
+})
+
+# ── 3) build a 1D target‐grid for xESMF using the same coords ─────────────────
+target_grid = xr.Dataset({
+    "lon": ("lon", lon1d),
+    "lat": ("lat", lat1d),
+})
+
+# ── 4) regrid ERA5 → MODIS grid (bilinear) ───────────────────────────────────
+print("→ regridding ERA5 onto MODIS grid…")
+re_e = xe.Regridder(ds_era5, target_grid, method="bilinear", periodic=False)
+era5_on_modis = re_e(ds_era5)
+# align times exactly to the MODIS time axis
+era5_on_modis = era5_on_modis.reindex(time=ds_modis.time)
+
+# ── 5) regrid CMEMS → MODIS grid (bilinear) ──────────────────────────────────
+print("→ regridding CMEMS onto MODIS grid…")
+re_c = xe.Regridder(ds_cmems, target_grid, method="bilinear", periodic=False)
+cmems_on_modis = re_c(ds_cmems)
+cmems_on_modis = cmems_on_modis.reindex(time=ds_modis.time)
+
+# ── 6) merge all three stacks into one Dataset ────────────────────────────────
+print("→ merging MODIS + ERA5 + CMEMS…")
+ds_root = xr.merge([ds_modis, era5_on_modis, cmems_on_modis])
+
+# ── 7) write out your final root_dataset.nc ───────────────────────────────────
+print(f"→ writing merged dataset to {OUT!r}")
+ds_root.to_netcdf(OUT)
+print("✅ Done.")

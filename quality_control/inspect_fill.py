@@ -18,6 +18,7 @@ Run:
 import argparse, itertools, pathlib
 import xarray as xr, numpy as np, matplotlib.pyplot as plt
 import matplotlib.ticker as mt
+import scipy.ndimage as ndi
 
 # ---------------- user paths ---------------------------------------------------
 DATA = pathlib.Path("/Users/yashnilmohanty/Desktop/HABs_Research/Processed/root_dataset.nc")
@@ -71,28 +72,28 @@ plt.show()
 if FILL:
     import scipy.ndimage as ndi
 
-    def fill_small_holes(da, n_pix=HOLE_SIZE):
-        """Fill NaN clusters ≤ n_pix using nearest spatial neighbour (per-time)."""
+    def fill_small_holes(da, max_pixels=HOLE_SIZE):
+        """
+        Fill NaN blobs with ≤ max_pixels cells (per–time slice)
+        using the nearest valid neighbour.
+        """
         filled = []
-        for t in da.time:
-            slice_ = da.sel(time=t)
-            mask   = np.isnan(slice_)
-            # label contiguous NaN blobs
+        iy, ix = np.indices(da.shape[-2:])          # 2-D index arrays once
+        for slab in da:                             # loop over 'time' already vectorised
+            A = slab.values.copy()
+            mask  = np.isnan(A)
             lbl, nblob = ndi.label(mask)
-            out = slice_.copy()
-            for lab in range(1, nblob+1):
-                idx = np.where(lbl == lab)
-                if idx[0].size <= n_pix:          # small hole
-                    # nearest non-NaN value
-                    yy, xx = idx[0][0], idx[1][0]
-                    value  = slice_.values
-                    # brute nearest (could use KD-tree for speed)
-                    dist   = np.sqrt((~mask)*1e9 + (np.indices(mask.shape)[0]-yy)**2 +
-                                     (np.indices(mask.shape)[1]-xx)**2)
-                    jj, ii = np.unravel_index(dist.argmin(), dist.shape)
-                    out.values[idx] = value[jj, ii]
-            filled.append(out)
-        return xr.concat(filled, dim="time")
+            # distance to nearest valid pixel
+            dist, (j_src, i_src) = ndi.distance_transform_edt(
+                mask, return_distances=True, return_indices=True
+            )
+
+            for lab in range(1, nblob + 1):
+                blob_idx = lbl == lab
+                if blob_idx.sum() <= max_pixels:
+                    A[blob_idx] = A[j_src[blob_idx], i_src[blob_idx]]
+            filled.append(xr.DataArray(A, coords=slab.coords, dims=slab.dims))
+        return xr.concat(filled, dim=da.dims[0])
 
     print("\n→ Filling small NaN holes in MODIS layers …")
     for v in MODIS_VARS:

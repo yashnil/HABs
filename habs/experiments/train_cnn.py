@@ -10,9 +10,15 @@ python experiments/train_cnn.py --epochs 1 --num_workers 0
 # small random crops & 4 workers (Linux / CUDA)
 python experiments/train_cnn.py --epochs 20 --crop 128 --num_workers 4
 """
+
+import os, platform
+if platform.system() == "Darwin":          # macOS / Apple-silicon
+    os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 from pathlib import Path
 import argparse, tqdm, torch, torch.nn as nn, torch.optim as optim
-from feature_engineering.split_dataloader import get_loaders                     # pkg import
+from habs.feature_engineering.split_dataloader import get_loaders                  # pkg import
 
 # ---------- tiny UNet-like stub just to prove the pipeline --------------------
 class TinyCNN(nn.Module):

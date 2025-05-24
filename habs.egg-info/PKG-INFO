@@ -1,3 +1,7 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.2
 Name: habs
 Version: 0.1
+Summary: Harmful-Algal-Bloom modelling pipeline
+Author: Yashnil Mohanty
+License: MIT
+Requires-Python: >=3.9

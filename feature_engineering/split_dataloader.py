@@ -102,3 +102,7 @@ if __name__ == "__main__":
         train_ld, *_ = get_loaders(batch=4, crop=(128,128))
         x = next(iter(train_ld))        # (B,C,H,W)
         print("demo batch", x.shape)    # e.g. torch.Size([4, 19, 128, 128])
+
+'''
+demo batch torch.Size([4, 18, 128, 128])
+'''

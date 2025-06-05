@@ -1,9 +1,11 @@
 loss:
-type: BCEWithLogitsLoss
-pos_weight: 26165.07
+  type: BCEWithLogitsLoss
+  pos_weight: 26165.07
+
 optimizer:
-type: Adam
-lr: 1e-3
+  type: Adam
+  lr: 1e-3
+
 batch_size: 4
 num_epochs: 20
 crop: 128

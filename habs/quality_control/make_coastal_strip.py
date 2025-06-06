@@ -1,49 +1,47 @@
 #!/usr/bin/env python3
 """
-make_coastal_strip.py  –  ocean pixels within R grid-cells of land
-Writes : coastal_strip.zarr  (DataArray lat, lon)   uint8 {0,1}
+make_coastal_strip.py
+---------------------
+Builds a coastal-strip mask that *always* includes the shoreline row.
+
+Output:  coastal_strip.zarr   uint8  (lat, lon)
 """
 from pathlib import Path
 import argparse, numpy as np, xarray as xr
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import distance_transform_edt as dist
 
 ROOT   = Path("/Users/yashnilmohanty/Desktop/HABs_Research/Processed")
-FEAT_Z = ROOT / "features.zarr"
+FEAT_Z = ROOT / "features.zarr"          # has static land/sea mask
 OUT_Z  = ROOT / "coastal_strip.zarr"
 
-# ── CLI ----------------------------------------------------------------------
-cli = argparse.ArgumentParser()
-cli.add_argument("--radius", type=int, default=5,
-                 help="# grid cells from shoreline (default 5)")
-args = cli.parse_args()
-R = int(args.radius)
+# ── CLI ---------------------------------------------------------------------
+p = argparse.ArgumentParser()
+p.add_argument("--radius", type=int, default=5,
+               help="strip half-width in grid cells (default 5)")
+R = p.parse_args().radius
 
-# ── load static ocean mask ----------------------------------------------------
-feat      = xr.open_zarr(FEAT_Z)
-ocean_da  = feat["features"].sel(channel="mask").isel(time=0)   # (lat,lon)
-ocean     = ocean_da.values.astype(bool)                        # (H,W)
+# ── load static mask (1 = ocean, 0 = land) ----------------------------------
+feat   = xr.open_zarr(FEAT_Z)
+mask_da = feat["features"].sel(channel="mask").isel(time=0)  # (lat,lon)
+ocean   = mask_da.values.astype(bool)                        # bool array
 
-# ── distance field ------------------------------------------------------------
-dist2land = distance_transform_edt(~ocean)      # every ocean-px → nearest land (cells)
-strip     = (ocean & (dist2land <= R)).astype("uint8")
+# ── distance to land and to ocean -------------------------------------------
+dist2land  = dist(~ocean)   # ocean → nearest land
+dist2ocean = dist(ocean)    # land  → nearest ocean
 
-# ── wrap as DataArray  --------------------------------------------------------
+# Pixel is inside strip if ***either***
+#   (a) ocean-pixel closer than R to land   OR
+#   (b) land-pixel closer than R to ocean   ← adds the shoreline row
+strip_bool = ((ocean & (dist2land  <= R)) |
+              (~ocean & (dist2ocean <= R)))
+
 strip_da = xr.DataArray(
-    strip,
-    coords=dict(
-        # *** cast coords to float32 so they match labels.zarr ***  ↓↓↓↓
-        lat = ocean_da.lat.astype("float32"),    #  <── key change
-        lon = ocean_da.lon.astype("float32")     #  <── key change
-    ),
+    strip_bool.astype("uint8"),
+    coords=dict(lat=mask_da.lat, lon=mask_da.lon),
     dims=("lat", "lon"),
     name="coastal_strip",
-    attrs=dict(description=f"ocean pixels within {R} cells of land")
-)
+    attrs={"description": f"all pixels ≤{R} cells from shoreline"}
+).sortby("lat")                         # lat ascending
 
-# make sure latitude is ascending (matches labels)
-if strip_da.lat[0] > strip_da.lat[-1]:
-    strip_da = strip_da.sortby("lat")
-
-# ── write ---------------------------------------------------------------------
 strip_da.chunk({"lat": -1, "lon": -1}).to_zarr(OUT_Z, mode="w")
-print(f"✅ wrote {OUT_Z}  (radius = {R} cells, lat ascending)")
+print(f"✅ wrote {OUT_Z}  (radius = {R} cells, shoreline assured)")

@@ -66,7 +66,8 @@ def main():
     batch_size  = args.batch       or cfg.get("batch_size" ,  4)
     crop_sz     = args.crop        or cfg.get("crop")
     num_workers = args.num_workers or cfg.get("num_workers", 0)
-    lr          = cfg.get("optimizer", {}).get("lr", 1e-3)
+    lr = float(cfg.get("optimizer", {}).get("lr", 1e-3))
+    
     pos_w       = float(cfg.get("loss", {}).get("pos_weight", 1.0))
 
     # ── device ----------------------------------------------------------------
